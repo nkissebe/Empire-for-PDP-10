@@ -1,0 +1,130 @@
+
+        TITLE   FORSUP  FORTRAN-10 SUPPORT ROUTINES
+
+; CALLING SEQUENCES:
+;       CALL OUTCHR(ICH)        TYPE ONE CHARACTER
+;       CALL OUTSTR(STR)        TYPE AN ASCIZ STRING
+;       J=LSH(IVAL,ICNT)        LOGICAL SHIFT, ICNT<0 SHIFTS RIGHT
+;       X=GETTAB(TABLE,ITEM)    READ A MONITOR TABLE WORD
+;       CALL SLEEP(ISECS)       SLEEP ISECS SECONDS
+;       CALL MSTIME(IT)         TIME OF DAY IN MILLISECONDS
+;       I=ILDET(NAME)           0 IF FILE 'NAME' IS ON DSK, ELSE 1
+;       CALL DECPRT(N)          TYPE N IN DECIMAL, NO CARRIAGE CONTROL
+;       EXITC.                  CONTINUABLE EXIT TO MONITOR (SUBS.MAC RETURN ADDRESS)
+
+        ENTRY   OUTCHR,OUTSTR,LSH,GETTAB,SLEEP,MSTIME,ILDET,DECPRT
+
+;TTCALL comes from the system UUO definitions, as in the deck's other .MAC files.
+        OPDEF   .OUCHR [TTCALL 1,]      ;OUTCHR -- THE ENTRY NAME MASKS THE OP
+        OPDEF   .OUSTR [TTCALL 3,]      ;OUTSTR -- DITTO
+        OPDEF   .SHIFT [LSH 0,] ;LSH    -- DITTO
+        SLEEP.==31              ;CALLI 31 = SLEEP
+        GETTB.==41              ;CALLI 41 = GETTAB
+        MSTIM.==23              ;CALLI 23 = MSTIME
+
+        T0=0
+        T1=1
+        T2=2
+        T3=3
+        T4=4
+        P=17
+
+OUTCHR: MOVE    T0,@0(16)       ;THE CHARACTER
+        MOVEM   T0,CHWD         ;THE UUO ADDRESSES IT IN CORE
+        .OUCHR  CHWD
+        POPJ    P,
+CHWD:   0
+
+OUTSTR: HRRZ    T0,0(16)        ;ADDRESS OF THE ASCIZ STRING
+        .OUSTR  (T0)            ;TTCALL 3, = OUTSTR
+        POPJ    P,
+
+LSH:    MOVE    T0,@0(16)       ;VALUE -- AC 0 IS THE RESULT REGISTER
+        MOVE    T1,@1(16)       ;SHIFT COUNT
+        .SHIFT  (T1)            ;LSH 0,(T1)
+        POPJ    P,
+
+GETTAB: MOVE    T1,@1(16)       ;ITEM, -1 MEANS THIS JOB
+        HRLZ    T0,T1
+        MOVE    T1,@0(16)       ;TABLE
+        HRR     T0,T1           ;AC 0 = ITEM,,TABLE
+        CALLI   T0,GETTB.       ;SKIPS ON SUCCESS, VALUE IN AC 0
+         SETZ   T0,             ;ILLEGAL TABLE -- RETURN 0
+        POPJ    P,
+
+SLEEP:  MOVE    T0,@0(16)       ;SECONDS
+        CALLI   T0,SLEEP.
+        POPJ    P,
+
+MSTIME: CALLI   T0,MSTIM.       ;AC 0 = MSEC SINCE MIDNIGHT
+        MOVEM   T0,@0(16)
+        POPJ    P,
+
+ILDET:  PUSH    P,T2
+        PUSH    P,T3
+        PUSH    P,T4
+        SETZM   LKBNAM          ;CLEAR THE FILENAME WORD
+        SETZM   LKBEXT          ; AND THE EXTENSION WORD
+        MOVE    T2,[POINT 7,0]
+        HRR     T2,0(16)        ;T2 POINTS AT THE ASCII NAME
+        MOVE    T3,[POINT 6,LKBNAM]     ;SIXBIT OUT, 6 NAME CHARS
+        MOVEI   T4,6
+ILDNM:  ILDB    T1,T2           ;NEXT CHARACTER
+        JUMPE   T1,ILDLUK       ;END OF STRING
+        CAIN    T1,"."
+         JRST   ILDDOT          ;A DOT STARTS THE EXTENSION
+        SUBI    T1,40           ;ASCII TO SIXBIT
+        SOJL    T4,ILDNM        ;NAME FULL -- IGNORE EXTRA CHARS
+        IDPB    T1,T3
+        JRST    ILDNM
+ILDDOT: MOVE    T3,[POINT 6,LKBEXT]     ;SIXBIT OUT, EXTENSION IN LEFT HALF
+        MOVEI   T4,3
+ILDEX:  ILDB    T1,T2
+        JUMPE   T1,ILDLUK
+        SUBI    T1,40
+        SOJL    T4,ILDLUK
+        IDPB    T1,T3
+        JRST    ILDEX
+ILDLUK: OPEN    1,OPNBLK
+         JRST   ILNONE          ;NO DSK -- CALL IT ABSENT
+        LOOKUP  1,LKBLK
+         JRST   ILREL           ;NOT FOUND
+        RELEAS  1,
+        SETZ    T0,             ;FOUND -- RETURN 0
+        JRST    ILDRET
+ILREL:  RELEAS  1,
+ILNONE: MOVEI   T0,1            ;ABSENT -- RETURN 1
+ILDRET: POP     P,T4
+        POP     P,T3
+        POP     P,T2
+        POPJ    P,
+
+OPNBLK: EXP     0               ;DATA MODE 0 -- WE ONLY LOOKUP
+        'DSK   '
+        EXP     0
+LKBLK:
+LKBNAM: EXP     0               ;SIXBIT FILENAME
+LKBEXT: EXP     0               ;SIXBIT EXTENSION,,0
+        EXP     0               ;PPN 0 -- THE JOB'S OWN DIRECTORY
+        EXP     0               ;LENGTH, RETURNED BY LOOKUP
+
+DECPRT: MOVE    T0,@0(16)       ;N
+        JUMPGE  T0,DECPU
+        MOVEI   T1,"-"
+        .OUCHR  T1              ;LEADING MINUS
+        MOVN    T0,T0           ;T0 = ABS(N)
+DECPU:  PUSHJ   P,DECDIG
+        POPJ    P,
+DECDIG: IDIVI   T0,^D10         ;T0/10, REMAINDER IN T1
+        PUSH    P,T1
+        SKIPE   T0
+         PUSHJ  P,DECDIG        ;HIGHER DIGITS FIRST
+        POP     P,T1
+        ADDI    T1,"0"          ;TO ASCII
+        .OUCHR  T1
+        POPJ    P,
+
+EXITC.::CALLI   1,12            ;EXIT 1, -- CONTINUABLE EXIT TO MONITOR
+
+        XPUNGE
+        END
